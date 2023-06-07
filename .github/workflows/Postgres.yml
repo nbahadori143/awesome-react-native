@@ -1,0 +1,63 @@
+name: Install Nomad-Pack and Deploy to Nomad
+
+on: 
+  workflow_dispatch:
+
+env:
+  ACR_LOGON_SERVER: ${{ secrets.ACR_NAME }}.azurecr.io
+  IMAGE_NAME_CLOUDSTATION: ${{ secrets.ACR_NAME }}.azurecr.io/babilou-qt-backend:latest
+  NOMAD_TOKEN: ${{ secrets.NOMAD_TOKEN }}
+
+jobs:
+  build:
+    name: Install Nomad-Pack
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Install make
+      run: sudo apt-get install make
+
+    - name: Set up Go
+      run: |
+        wget https://go.dev/dl/go1.20.4.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go1.20.4.linux-amd64.tar.gz
+        echo "PATH=$PATH:/usr/local/go/bin" >> $GITHUB_ENV
+
+    - name: Verify Go version
+      run: go version
+
+    - name: Download and Build Nomad-Pack
+      run: |
+        git clone https://github.com/hashicorp/nomad-pack.git
+        cd nomad-pack
+        make dev
+        echo "PATH=$PATH:$(pwd)/bin" >> $GITHUB_ENV
+
+    - name: Verify Nomad-Pack installation
+      run: nomad-pack version
+
+    - name: Add private registry
+      run: |
+          nomad-pack registry add my-registry ${{ secrets.NOMAD_PACK_REGISTRY }}
+          nomad-pack registry list
+
+        
+    - name: 'Create pack variables file'
+      run: |
+        cat <<EOF > variables.hcl
+        service_name = "babilou-qt-backend"
+        service_port = 3000
+        service_tags = ["api", "urlprefix-babilou-qt-backend-master.blockchainr.app/"]
+        service_check_interval = "10s"
+        service_check_timeout = "2s"
+        image = "acrbc001.azurecr.io/babilou-qt-backend:latest"
+        EOF
+
+    - name: Run `nomad-pack info` for `simple_service`
+      run: nomad-pack run -var-file=variables.hcl simple_service 
+      env:
+        NOMAD_ADDR: "${{ secrets.NOMAD_ADDR }}"
+        NOMAD_TOKEN: "${{ secrets.NOMAD_TOKEN }}"
+      continue-on-error: true
